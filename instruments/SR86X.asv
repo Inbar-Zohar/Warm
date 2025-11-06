@@ -1,0 +1,499 @@
+classdef SR86X
+    properties
+        Ins
+    end
+    methods
+        function obj = SR86X(serial,connection_type)
+            if ~exist('serial','var'); serial = '02252'; end
+            if ~exist('connection_type','var'); connection_type = 'tcpip'; end
+            switch lower(connection_type)
+                case 'tcpip'
+                    if isnumeric(serial); serial = num2str(serial); end
+                    obj.Ins = instrfind('Type','visa-tcpip','name',['TCPIP0::' serial '::inst0::INSTR']);
+                    if isempty(obj.Ins)
+                        obj.Ins = visa('NI',['TCPIP0::' serial '::inst0::INSTR']);
+                    else
+                        fclose(obj.Ins);
+                        obj.Ins = obj.Ins(1);
+                    end
+                case 'usb'
+                    if strcmp(serial(1:3),'USB')
+                        obj.Ins = visa('NI', serial);
+                    else
+                        obj.Ins = visa('NI', ['USB0::0x0957::' serial '::0::INSTR']);
+                    end
+            end
+            set(obj.Ins,'InputBufferSize',2^18);
+            set(obj.Ins,'OutputBufferSize',2^18);
+            obj.Ins.Timeout = 2;
+            
+            if ~strcmp(serial(1:3),'USB'); fclose(obj.Ins); end
+        end
+
+        function data = IDN(obj); data = query(obj.Ins,'*IDN?'); end % IDN
+        function data = Device(obj); IDN = obj.IDN; data = IDN(27:31); end % IDN        
+        function Clear(obj); fprintf(obj.Ins,'*CLS'); end % Clear
+        function Reset(obj); fprintf(obj.Ins,'*RST'); end % Reset Configuration
+
+        %% Get current measurement results
+        function data = ShowChannelScreen(obj,ch) %Show channel screen
+            data = query(obj.Ins,sprintf('OUTR? %d',ch));
+        end
+        function data = ShowX(obj) %Show X
+            data = str2double(query(obj.Ins,'OUTP? 1'));
+        end
+        function data = ShowY(obj) %Show Y
+            data = str2double(query(obj.Ins,'OUTP? 2'));
+        end
+        function data = ShowR(obj) %Show R
+            data = str2double(query(obj.Ins,'OUTP? 3'));
+        end
+        function data = ShowTheta(obj) %Show omega
+            data = str2double(query(obj.Ins,'OUTP? 4'));
+        end
+        function data = ShowFreq(obj) %Show frequency
+            data = str2double(query(obj.Ins,'FREQ?'));
+        end
+
+
+        %% Set/Get Configuration       
+        function setSensitivity(obj,num)
+            if isnumeric(num)
+                val = -round(log10(num)*3);
+                if val < 0 || val > 27
+                    error('Bad input value %g. Should be 1e-9<=x<=1',num)
+                end
+            else
+                error('Non numeric input value');
+            end
+            fprintf(obj.Ins,sprintf('SCAL %d',val)); 
+        end
+        function data = getSensitivity(obj)
+            x = str2double(query(obj.Ins,'SCAL?'));
+            data = round(10.^((-mod(x-1,3)+2)/3)) .* 10.^((-floor((x-1)/3)-1));
+        end       
+
+        function setTConst(obj,num)
+            if isnumeric(num)
+                val = round(log10(num)*2)+12;
+                if val < 0 || val > 21
+                    error('Bad input value %g. Should be 1e-6<=x<=30e3',num)
+                end
+            else
+                error('Non numeric input value');
+            end
+            fprintf(obj.Ins,sprintf('OFLT %d',val)); 
+        end
+        function data = getTConst(obj)
+            x = str2double(query(obj.Ins,'OFLT?'));
+            data = (1 + 2*mod(x,2)) .* 10.^(floor((x)/2) - 6);
+        end       
+
+        function setInputRange(obj,num)
+            if isnumeric(num)
+                val = -round(log10(num)*2);
+                if val < 0 || val > 4
+                    error('Bad input value %g. Should be 0.01<=x<=1',num)
+                end
+            else
+                error('Non numeric input value');
+            end
+            fprintf(obj.Ins,sprintf('IRNG %d',val)); 
+        end
+        function data = getInputRange(obj)
+            x = str2double(query(obj.Ins,'IRNG?'));
+            data = (1 + 2*mod(x,2)) .* 10.^(-floor((x+1)/2));
+        end       
+
+        function setSignalInputMode(obj,typ)
+            if ischar(typ)
+                if strcmpi(typ,'A')
+                    val = 0;
+                elseif strcmpi(typ,'A-B')
+                    val = 1;
+                else
+                    error('String input should be "A" or "A-B", not %s',typ)
+                end
+            else
+                val = double(logical(typ));
+            end
+            fprintf(obj.Ins,sprintf('ISRC %d',val));
+        end
+        function setSignalInputModeA(obj); obj.setSignalInputMode(0); end
+        function setSignalInputModeAminusB(obj); obj.setSignalInputMode(1); end
+        function typ = getSignalInputMode(obj)
+            x = str2double(query(obj.Ins,'ISRC?'));
+            if ~x; typ = 'A'; else; typ = 'A-B'; end
+        end
+
+        function setSignalInputCoupling(obj,typ)
+            if ischar(typ)
+                if strcmpi(typ,'AC')
+                    val = 0;
+                elseif strcmpi(typ,'DC')
+                    val = 1;
+                else
+                    error('String input should be "AC" or "DC", not %s',typ)
+                end
+            else
+                val = double(logical(typ));
+            end
+            fprintf(obj.Ins,sprintf('ICPL %d',val));
+        end
+        function setSignalInputCouplingAC(obj); obj.setSignalInputCoupling(0); end
+        function setSignalInputCouplingDC(obj); obj.setSignalInputCoupling(1); end
+        function typ = getSignalInputCoupling(obj)
+            x = str2double(query(obj.Ins,'ICPL?'));
+            if x==1; typ = 'DC'; else; typ = 'AC'; end
+        end
+
+        function setSignalInputShield(obj,typ)
+            if ischar(typ)
+                if strcmpi(typ,'Float')
+                    val = 0;
+                elseif strcmpi(typ,'Ground')
+                    val = 1;
+                else
+                    error('String input should be "Float" or "Ground", not %s',typ)
+                end
+            else
+                val = double(logical(typ));
+            end
+            fprintf(obj.Ins,sprintf('IGND %d',val));
+        end
+        function setSignalInputShieldFloat(obj); obj.setSignalInputShield(0); end
+        function setSignalInputShieldGround(obj); obj.setSignalInputShield(1); end
+        function typ = getSignalInputShield(obj)
+            x = str2double(query(obj.Ins,'IGND?'));
+            if ~x; typ = 'Float'; else; typ = 'Ground'; end
+        end
+
+        function setFilterOrder(obj,num)
+            if isnumeric(num)
+                val = round(num-1);
+                if val < 0 || val > 3
+                    error('Bad input value %g. Should be 1<=x<=4',num)
+                end
+            else
+                error('Non numeric input value');
+            end
+            fprintf(obj.Ins,sprintf('OFSL %d',val)); 
+        end
+        function data = getFilterOrder(obj)
+            x = str2double(query(obj.Ins,'OFSL?'));
+            data = x + 1;
+        end       
+
+        function setSyncFilter(obj,stt)
+            val = double(logical(stt));
+            fprintf(obj.Ins,sprintf('SYNC %d',val));
+        end
+        function setSyncFilterON(obj); obj.setSyncFilter(1); end
+        function setSyncFilterOFF(obj); obj.setSyncFilter(0); end
+        function stt = getSyncFilter(obj)
+            stt = str2double(query(obj.Ins,'SYNC?'));
+        end
+
+        function setAdvancedFilter(obj,stt)
+            val = double(logical(stt));
+            fprintf(obj.Ins,sprintf('ADVFILT %d',val));
+        end
+        function setAdvancedFilterON(obj); obj.setAdvancedFilter(1); end
+        function setAdvancedFilterOFF(obj); obj.setAdvancedFilter(0); end
+        function stt = getAdvancedFilter(obj)
+            stt = str2double(query(obj.Ins,'ADVFILT?'));
+        end
+
+        function setSignalInputType(obj,typ)
+            if ischar(typ)
+                if strncmpi(typ,'voltage',4)
+                    val = 0;
+                elseif strncmpi(typ,'current',4)
+                    val = 1;
+                else
+                    error('String input should be "Volage" or "Current", not %s',typ)
+                end
+            else
+                val = double(logical(typ));
+            end
+            fprintf(obj.Ins,sprintf('IVMD %d',val));
+        end
+        function setSignalInputTypeVoltage(obj); obj.setSignalInputType(0); end
+        function setSignalInputTypeCurrent(obj); obj.setSignalInputType(1); end
+        function typ = getSignalInputType(obj)
+            x = str2double(query(obj.Ins,'IVMD?'));
+            if ~x; typ = 'Voltage'; else; typ = 'Current'; end
+        end
+
+        function setOutputCh(obj,ch,typ)
+            if ch == 1
+                if ischar(typ)
+                    if strncmpi(typ,'X',1)
+                        val = 0;
+                    elseif strncmpi(typ,'R',1)
+                        val = 1;
+                    else
+                        error('CH1 can be set to either X or R, requested %s', typ)
+                    end
+                else
+                    val = double(logical(typ));
+                end
+            elseif ch == 2
+                if ischar(typ)
+                    if strcmpi(typ,'Y') || strcmpi(typ,'XY')
+                        val = 0;
+                    elseif strncmpi(typ,'TH',2) || strncmpi(typ,'RTH',3) 
+                        val = 1;
+                    else
+                        error('CH2 can be set to either Y or THeta, requested %s', typ)
+                    end
+                else
+                    val = double(logical(typ));
+                end
+            else
+                error('ch must be 1 or 2, requested %g', ch)
+            end
+            fprintf(obj.Ins,sprintf('COUT %d %d',ch-1, val));
+        end               
+        function setOutputCh1(obj,typ); obj.setOutputCh(1,typ); end
+        function setOutputCh2(obj,typ); obj.setOutputCh(2,typ); end
+        function setOutputChX(obj); obj.setOutputCh(1,'X'); end
+        function setOutputChY(obj); obj.setOutputCh(2,'Y'); end
+        function setOutputChR(obj); obj.setOutputCh(1,'R'); end
+        function setOutputChTheta(obj); obj.setOutputCh(2,'TH'); end
+
+        function data = getOutputCh(obj,ch)
+            val = str2double(query(obj.Ins,sprintf('COUT? %d',ch-1)));
+            if ch == 1
+                if val == 0; data = 'X'; else; data = 'R'; end
+            elseif ch == 2
+                if val == 0; data = 'Y'; else; data = 'TH'; end
+            end
+        end
+        function data = getOutputCh1(obj); data = getOutputCh(obj,1); end
+        function data = getOutputCh2(obj); data = getOutputCh(obj,2); end
+
+        function setOutputExpand(obj,ch,expand)
+            if ischar(ch)
+                if strcmpi(ch,'X'); ch_ind = 0;
+                elseif strcmpi(ch,'Y'); ch_ind = 1;
+                elseif strcmpi(ch,'R'); ch_ind = 2;
+                else; error('ch must be X, Y or R, requested %s', ch);
+                end
+            elseif isnumeric(ch)
+                if ismember(ch,[0 1 2]); ch_ind = ch;
+                else; error('ch must be 0, 1 or 2, requested %g', ch);
+                end
+            else
+                disp(ch)
+                error('What the hell did you give as channel?')
+            end
+            if ischar(expand)
+                if strcmpi(expand,'OFF'); expand_ind = 0;
+                elseif strcmpi(expand,'10') || strcmpi(expand,'X10'); expand_ind = 1;
+                elseif strcmpi(expand,'100') || strcmpi(expand,'X100'); expand_ind = 2;
+                else; error('ch must be OFF, X10 or X100, requested %s', expand);
+                end
+            elseif isnumeric(expand)
+                if ismember(expand,[0 1 2]); expand_ind = expand;
+                else; error('expand must be 0,1 or 2, requested %g', expand);
+                end
+            else
+                disp(expand)
+                error('What the hell did you give as the output expand factor?')
+            end
+            fprintf(obj.Ins,sprintf('CEXP %d %d',ch_ind, expand_ind));
+        end
+        function setOutputExpandX(obj,expand); obj.setOutputExpand('X',expand); end
+        function setOutputExpandY(obj,expand); obj.setOutputExpand('Y',expand); end
+        function setOutputExpandR(obj,expand); obj.setOutputExpand(R',expand); end
+
+        function data = getOutputExpand(obj,ch)
+            if ischar(ch)
+                if strcmpi(ch,'X'); ch_ind = 0;
+                elseif strcmpi(ch,'Y'); ch_ind = 1;
+                elseif strcmpi(ch,'R'); ch_ind = 2;
+                else; error('ch must be X, Y or R, requested %s', ch);
+                end
+            elseif isnumeric(ch)
+                if ismember(ch,[0 1 2]); ch_ind = ch;
+                else; error('ch must be 0, 1 or 2, requested %g', ch);
+                end
+            else
+                disp(ch)
+                error('What the hell did you give as channel?')
+            end            
+            val = str2double(query(obj.Ins,sprintf('CEXP? %d',ch_ind)));
+            switch val 
+                case 0; data = 'OFF';
+                case 1; data = 'X10';
+                case 2; data = 'X100';                    
+            end
+        end
+        function data = getOutputExpandX(obj); data = getOutputExpand(obj,'X'); end
+        function data = getOutputExpandY(obj); data = getOutputExpand(obj,'Y'); end
+        function data = getOutputExpandR(obj); data = getOutputExpand(obj,'R'); end
+
+        function setPhase(obj,num)
+            fprintf(obj.Ins,sprintf('PHAS %d',num));
+        end
+        function data = getPhase(obj)
+            data = str2double(query(obj.Ins,'PHAS?'));
+        end
+
+        function setRefSource(obj,typ)
+            if ischar(typ)
+                if strncmpi(typ,'internal',3)
+                    val = 0;
+                elseif strncmpi(typ,'external',3)
+                    val = 1;
+                elseif strncmpi(typ,'dual',4)
+                    val = 2;
+                elseif strncmpi(typ,'chop',4)
+                    val = 3;
+                else                    
+                    error('String input should be "INT"/"EXT"/"DUAL"/"CHOP", not %s',typ)
+                end
+            else
+                if ismember(typ,0:3)
+                    val = typ;
+                else
+                    error('Numerical input should be 0 to 3, not %g',typ)
+                end
+            end
+            fprintf(obj.Ins,sprintf('RSRC %d',val));
+        end
+        function data = getRefSource(obj)
+            val = str2double(query(obj.Ins,'RSRC?'));
+            switch val
+                case 0
+                    data = 'INT';
+                case 1
+                    data = 'EXT';
+                case 2
+                    data = 'DUAL';
+                case 3
+                    data = 'CHOP';
+            end
+        end
+
+        function setExtRefMode(obj,typ)
+            if ischar(typ)
+                if strncmpi(typ,'sine',3)
+                    val = 0;
+                elseif strncmpi(typ,'posTTL',3)
+                    val = 1;
+                elseif strncmpi(typ,'negTTL',3)
+                    val = 2;
+                else                    
+                    error('String input should be "SIN"/"POS"/"NEG", not %s',typ)
+                end
+            else
+                if ismember(typ,0:2)
+                    val = typ;
+                else
+                    error('Numerical input should be 0 to 2, not %g',typ)
+                end
+            end
+            fprintf(obj.Ins,sprintf('RTRG %d',val));
+        end
+        function data = getExtRefMode(obj)
+            val = str2double(query(obj.Ins,'RTRG?'));
+            switch val
+                case 0
+                    data = 'SIN';
+                case 1
+                    data = 'POS';
+                case 2
+                    data = 'NEG';
+            end
+        end
+
+        function setExtRefTermination(obj,typ)
+            if ischar(typ)
+                if strncmpi(typ,'50',2)
+                    val = 0;
+                elseif strncmpi(typ,'1',1)
+                    val = 1;
+                else                    
+                    error('String input should be "50 Ohm"/"1 MOhm", not %s',typ)
+                end
+            else
+                if ismember(typ,0:1)
+                    val = typ;
+                else
+                    error('Numerical input should be 0 to 2, not %g',typ)
+                end
+            end
+            fprintf(obj.Ins,sprintf('REFZ %d',val));
+        end
+        function data = getExtRefTermination(obj)
+            val = str2double(query(obj.Ins,'REFZ?'));
+            switch val
+                case 0
+                    data = '50 Ohm';
+                case 1
+                    data = '1 MOhm';
+            end
+        end 
+
+        %% Misc
+        function data = ENBW(obj); data = str2double(query(obj.Ins,'ENBW?')); end
+        function AutoPhase(obj); fprintf(obj.Ins,'APHS'); end
+
+        %% Full configuration commands
+        function [names,getters] = allConfigurationVariables(obj)
+            full_array = {...
+                'phase','Phase'
+                'sensitivity','Sensitivity'
+                'time_const','TConst'
+                'input_range','InputRange'
+                'signal_input_mode','SignalInputMode'
+                'signal_input_coupling','SignalInputCoupling'
+                'signal_input_shield','SignalInputShield'
+                'filter_order','FilterOrder'
+                'sync_filter','SyncFilter'
+                'advanced_filter','AdvancedFilter'
+                'signal_input_type','SignalInputType'
+                'output_ch1','OutputCh1'
+                'output_ch2','OutputCh2'
+                'ref_source','RefSource'
+                'ext_ref_mode','ExtRefMode'
+                'ext_ref_termination','ExtRefTermination'
+                };
+
+            names = full_array(:,1);
+            getters = full_array(:,2);
+        end
+
+        function getter = findGetterByName(obj,name,typ)
+            if ~exist('typ','var')
+                typ = 'get';
+            end
+            typ = lower(typ(1:3));
+            if ~(strcmp(typ,'get') || strcmp(typ,'set'))
+                error('typ should define getter or setter, not %s', typ);
+            end
+                
+            [names,getters] = obj.allConfigurationVariables;
+            getter = [typ getters{strcmp(name,names)}];
+        end
+
+        function config = readConfiguration(obj) %Read configuration
+            [names,getters] = obj.allConfigurationVariables;            
+            for ind=1:length(names)
+                config.(names{ind}) = obj.(obj.findGetterByName(names{ind},'get'));
+            end
+        end
+
+        function applyConfiguration(obj,config) %Read configuration
+            fields = fieldnames(config);
+            names = obj.allConfigurationVariables;
+            for ind=1:length(fields)
+                if ismember(fields{ind},names)
+                    obj.(obj.findGetterByName(fields{ind},'set'))(config.(fields{ind}));
+                end
+            end
+        end
+    end
+end
