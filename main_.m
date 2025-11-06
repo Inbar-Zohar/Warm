@@ -90,7 +90,7 @@ add_experimental_calibration;
 
 % daq definitions
 prm.cdaq_pause_time_sec = 1;
-prm.exp_time_min = 30; 
+prm.exp_time_min = 40; 
 prm.save_time_min = 1; 
 prm.ch_to_save= [1:12]; 
 % prm.ch_to_save= [1 2 3 4 5 6 7 8]; 
@@ -306,4 +306,5 @@ reset_all = 0;  % set reset to zero
 if ~flg.is_part_of_loop || prm.loop_data.ind_run == prm.loop_data.n_runs_total
     playblocking(gongObj);
 end
+
 logger.close_log
