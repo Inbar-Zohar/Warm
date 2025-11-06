@@ -1,0 +1,232 @@
+
+if ~isfield(prm,'max_t') || isnan(prm.max_t) || isempty(prm.max_t)
+    prm.max_t = Inf;
+end
+if ~isfield(prm,'min_t') || isnan(prm.min_t) || isempty(prm.min_t)
+    prm.min_t = -Inf;
+end
+if ~isfield(prm,'base_fig_num')
+    prm.base_fig_num = 300;
+end
+base_fig_num = prm.base_fig_num;
+tmax = prm.max_t;
+tmin = prm.min_t;
+time_s = meas.time_s;
+
+PID_V_129 = meas.PID_129_out;
+[srPSD_PID_129_V_srHz,~] = pwelch_and_smooth(PID_V_129,time_s,tmin,tmax);
+
+Omega_129_Hz = PID_V_129 * prm.WP.Xe129.mod_dev / 5;
+Omega_129_deg_hr = Omega_129_Hz * 360 * 3600;
+[srPSD_Omega_129_deg_hr_srHz,f] = pwelch_and_smooth(Omega_129_deg_hr,time_s,tmin,tmax);
+
+PID_V_131 = meas.PID_131_out;
+[srPSD_PID_131_V_srHz,~] = pwelch_and_smooth(PID_V_131,time_s,tmin,tmax);
+
+Omega_131_Hz = PID_V_131 * prm.WP.Xe131.mod_dev / 5;
+Omega_131_deg_hr = Omega_131_Hz * 360 * 3600;
+[srPSD_Omega_131_deg_hr_srHz,~] = pwelch_and_smooth(Omega_131_deg_hr,time_s,tmin,tmax);
+
+PID_V_sim = meas.PID_sim_out;
+[srPSD_PID_ESR_V_srHz,~] = pwelch_and_smooth(PID_V_sim,time_s,tmin,tmax);
+
+measurements = {'R','Y'};
+Xenons = {'129','131'};
+
+for ind_m=1:2
+    % Xenons
+    for ind_x=1:2
+        this_data_raw = meas.(sprintf('Xe_%s_%s',Xenons{ind_x},measurements{ind_m}));
+        this_LIAconfig = prm.WP.(sprintf('Xe%s',Xenons{ind_x})).LIAconfig;
+        if strcmp(this_LIAconfig.(sprintf('output_ch%i',ind_m)),measurements{ind_m})
+            this_data = get_act_LIA_signal(this_data_raw, ind_m, this_LIAconfig);
+        else
+            error('This script assumed you measured %s',measurements{ind_m})
+        end
+        eval(sprintf('%s_%s = this_data;',measurements{ind_m},Xenons{ind_x}))
+        this_srPSD = pwelch_and_smooth(this_data,time_s,tmin,tmax);
+        eval(sprintf('[srPSD_%s_%s,~] = this_srPSD;',measurements{ind_m},Xenons{ind_x}))
+    end
+    
+    % Sim
+    this_data_raw = meas.(sprintf('B_sim_%s',measurements{ind_m}));
+    this_LIAconfig = prm.WP.Sim.LIAconfig;
+    if strcmp(this_LIAconfig.(sprintf('output_ch%i',ind_m)),measurements{ind_m})
+        this_data = get_act_LIA_signal(this_data_raw, ind_m, this_LIAconfig);
+    else
+
+    else
+        error('This script assumed you measured %s',measurements{ind_m})
+    end
+    eval(sprintf('%s_sim = this_data;',measurements{ind_m},'sim'))
+    this_srPSD = pwelch_and_smooth(this_data,time_s,tmin,tmax);
+    eval(sprintf('[srPSD_%s_%s,~] = this_srPSD;',measurements{ind_m},'sim'))
+    
+end
+
+Theta_129 = asind(Y_129 ./ R_129);% * 180 / pi;
+srPSD_Theta_129 = pwelch_and_smooth(Theta_129,time_s,tmin,tmax);
+Theta_131 = asind(Y_131 ./ R_131);% * 180 / pi;
+srPSD_Theta_131 = pwelch_and_smooth(Theta_131,time_s,tmin,tmax);
+Theta_sim = asind(Y_sim ./ R_sim);% * 180 / pi;
+srPSD_Theta_sim = pwelch_and_smooth(Theta_sim,time_s,tmin,tmax);
+
+plot_sim = R_sim > 10e-3;
+%%
+this_fig = base_fig_num+1001;
+meas = create_fig(meas,this_fig);
+fig = gcf;
+
+has_pump_monitor = isfield(meas,'Pump_Monitor_PD');
+has_probe_monitor  = isfield(meas,'Probe_Monitor_PD');
+n_rows = 4 + has_pump_monitor + has_probe_monitor;
+
+fig.Position([3 4]) = [900 740+150*(n_rows-4)];
+if fig.Position(2) > 100; fig.Position(2) = 60; end
+
+
+t=tiledlayout(n_rows,2,"TileSpacing","compact","Padding","compact");
+title(t,{char(meas.DateTime_var), 'All time traces'})
+
+time_unit_min = 0;
+factor = iif(time_unit_min,60,1);
+xlbl = sprintf('time (%s)',iif(time_unit_min,'min','s'));
+xlabel(t,xlbl)
+movmean_param = meas.fs*3;
+
+
+nexttile; hold all; grid on;
+plot(time_s/factor, Y_129 - mean(Y_129), 'color',linecolor(1))
+plot(time_s/factor, Y_131 - mean(Y_131), 'color',linecolor(2))
+if plot_sim; plot(time_s/factor, Y_sim - mean(Y_sim), 'color',linecolor(3)); end
+xlim(time_s([1 end])/factor)
+ylabel('Y (V)')
+
+nexttile; hold all; grid on;
+plot(time_s/factor, movmean(Y_129,movmean_param) - mean(Y_129), 'color',brighten(linecolor(1),-0.3));
+plot(time_s/factor, movmean(Y_131,movmean_param) - mean(Y_131), 'color',brighten(linecolor(2),-0.3));
+if plot_sim; plot(time_s/factor, movmean(Y_sim,movmean_param) - mean(Y_sim), 'color',brighten(linecolor(3),-0.3)); end
+xlim(time_s([1 end])/factor)
+
+nexttile; hold all; grid on;
+plot(time_s/factor, R_129./mean(R_129)-1, 'color',linecolor(1))
+plot(time_s/factor, R_131./mean(R_131)-1, 'color',linecolor(2))
+if plot_sim; plot(time_s/factor, R_sim./mean(R_sim)-1, 'color',linecolor(3)); end
+xlim(time_s([1 end])/factor)
+ylabel('\deltaR/R')
+
+nexttile; hold all; grid on;
+plot(time_s/factor, movmean(R_129,movmean_param)./mean(R_129)-1, 'color',brighten(linecolor(1),-0.3));
+plot(time_s/factor, movmean(R_131,movmean_param)./mean(R_131)-1, 'color',brighten(linecolor(2),-0.3));
+if plot_sim; plot(time_s/factor, movmean(R_sim,movmean_param)./mean(R_sim)-1, 'color',brighten(linecolor(3),-0.3)); end
+xlim(time_s([1 end])/factor)
+
+nexttile; hold all; grid on;
+plot(time_s/factor, Theta_129 - mean(Theta_129), 'color',linecolor(1))
+plot(time_s/factor, Theta_131 - mean(Theta_131), 'color',linecolor(2))
+if plot_sim; plot(time_s/factor, Theta_sim - mean(Theta_sim), 'color',linecolor(3)); end
+xlim(time_s([1 end])/factor)
+ylabel('\Theta (deg)')
+
+nexttile; hold all; grid on;
+plot(time_s/factor, movmean(Theta_129,movmean_param) - mean(Theta_129), 'color',brighten(linecolor(1),-0.3));
+plot(time_s/factor, movmean(Theta_131,movmean_param) - mean(Theta_131), 'color',brighten(linecolor(2),-0.3));
+if plot_sim; plot(time_s/factor, movmean(Theta_sim,movmean_param) - mean(Theta_sim), 'color',brighten(linecolor(3),-0.3)); end
+xlim(time_s([1 end])/factor)
+
+nexttile; hold all; grid on;
+plot(time_s/factor, PID_V_129 - mean(PID_V_129), 'color',linecolor(1))
+plot(time_s/factor, PID_V_131 - mean(PID_V_131), 'color',linecolor(2))
+if plot_sim; plot(time_s/factor, PID_V_sim - mean(PID_V_sim), 'color',linecolor(3)); end
+xlim(time_s([1 end])/factor)
+ylabel('PID out (V)')
+xlabel(xlbl)
+
+nexttile; hold all; grid on;
+plot(time_s/factor, movmean(PID_V_129,movmean_param) - mean(PID_V_129), 'color',brighten(linecolor(1),-0.3));
+plot(time_s/factor, movmean(PID_V_131,movmean_param) - mean(PID_V_131), 'color',brighten(linecolor(2),-0.3));
+if plot_sim; plot(time_s/factor, movmean(PID_V_sim,movmean_param)- mean(PID_V_sim), 'color',brighten(linecolor(3),-0.3)); end
+xlim(time_s([1 end])/factor)
+
+if has_pump_monitor
+    nexttile; hold all; grid on;
+    plot(time_s/factor, meas.Pump_Monitor_PD - 0*mean(meas.Pump_Monitor_PD), 'color',linecolor(4))
+    xlim(time_s([1 end])/factor)
+    ylabel('PD_{Pump} (V)')
+
+    nexttile; hold all; grid on;
+    plot(time_s/factor, movmean(meas.Pump_Monitor_PD,movmean_param) - 0*mean(meas.Pump_Monitor_PD), 'color',brighten(linecolor(4),-0.3));
+    xlim(time_s([1 end])/factor)
+
+end
+
+if has_probe_monitor
+    nexttile; hold all; grid on;
+    plot(time_s/factor, meas.Probe_Monitor_PD - 0*mean(meas.Probe_Monitor_PD), 'color',linecolor(5))
+    xlim(time_s([1 end])/factor)
+    ylabel('PD_{Probe} (V)')
+
+    nexttile; hold all; grid on;
+    plot(time_s/factor, movmean(meas.Probe_Monitor_PD,movmean_param) - 0*mean(meas.Probe_Monitor_PD), 'color',brighten(linecolor(5),-0.3));
+    xlim(time_s([1 end])/factor)
+end
+
+
+%%
+this_fig = base_fig_num+1002;
+meas = create_fig(meas,this_fig);
+fig = gcf;
+fig.Position([4]) = [740];
+if fig.Position(2) > 400; fig.Position(2) = 200; end
+
+t=tiledlayout(3,1,"TileSpacing","compact","Padding","compact");
+title(t,{char(meas.DateTime_var), 'All PSD'})
+
+xl = [5e-3 6e1];
+
+nexttile; set(gca,'XScale','log','Yscale','log'); hold all; grid on;
+
+plot(f,srPSD_Y_129 ,'LineWidth',2,'DisplayName','Y_{129}','Color',linecolor(1))
+plot(f,srPSD_R_129,'--','LineWidth',2,'DisplayName','R_{129}','Color',brighten(linecolor(1),-0.3))
+plot(f,srPSD_Y_131 ,'LineWidth',2,'DisplayName','Y_{131}','Color',linecolor(2))
+plot(f,srPSD_R_131,'--' ,'LineWidth',2,'DisplayName','R_{131}','Color',brighten(linecolor(2),-0.3))
+if plot_sim; plot(f,srPSD_Y_sim ,'LineWidth',2,'DisplayName','Y_{sim}','Color',linecolor(3)); end
+if plot_sim; plot(f,srPSD_R_sim,'--' ,'LineWidth',2,'DisplayName','R_{sim}','Color',brighten(linecolor(3),-0.3)); end
+
+ylabel('\surdPSD_{sig} (V/\surdHz)')
+legend('Location','best')
+xlim(xl)
+% ylim([1e-8 5e-5])
+
+nexttile; set(gca,'XScale','log','Yscale','log'); hold all; grid on;
+plot(f,srPSD_Theta_129 ,'LineWidth',2,'DisplayName','\Theta_{129}','Color',linecolor(1))
+plot(f,srPSD_Theta_131 ,'LineWidth',2,'DisplayName','\Theta_{131}','Color',linecolor(2))
+if plot_sim; plot(f,srPSD_Theta_sim ,'LineWidth',2,'DisplayName','\Theta_{sim}','Color',linecolor(3)); end
+
+ylabel('\surdPSD_{\Theta} (deg/\surdHz)')
+legend('Location','best')
+xlim(xl)
+% ylim([1e-4 1e0])
+
+nexttile; set(gca,'XScale','log','Yscale','log'); hold all; grid on;
+plot(f,srPSD_PID_129_V_srHz ,'LineWidth',2,'DisplayName','PID_{129}','Color',linecolor(1))
+plot(f,srPSD_PID_131_V_srHz ,'LineWidth',2,'DisplayName','PID_{131}','Color',linecolor(2))
+plot(f,srPSD_PID_ESR_V_srHz ,'LineWidth',2,'DisplayName','PID_{ESR}','Color',linecolor(3))
+
+ylabel('\surdPSD_{PID} (V/\surdHz)')
+legend('Location','best')
+xlim(xl)
+
+
+xlabel('f (Hz)')
+
+
+        % yrange = ylim;
+        % if any(isfinite([prm.max_t prm.min_t]))
+        %     ptch = patch('XData',analysis_range([1 1 2 2 1]),'YData',yrange([1 2 2 1 1]), ...
+        %         'FaceColor','k','FaceAlpha',0.05,'EdgeColor','none');
+        %     this_ax = gca;
+        %     this_ax.Children = this_ax.Children([2:end 1]);
+        %     ptch.HandleVisibility = 'off';
+        % end
+        % ylim(yrange)

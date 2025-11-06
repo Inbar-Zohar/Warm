@@ -1,0 +1,138 @@
+% Xe FID Parameters
+T2_129 = 5.1;
+G129 = 1/T2_129;
+B129 = 45e-6*1e-4*1e15;
+T2_131 = 18;
+G131 = 1/T2_131;
+B131 = 130e-6*1e-4*1e15;
+
+filter_func_RC = @(s,p) 1./(1+abs(s).*p(1)).^p(2);
+filter_func_GaussFIR = @(s,p) exp(-(abs(s).*(p(1)/1.5)).^2 / 2 * p(2));
+
+try
+    meanLIAR_sim = mean(R_sim);
+    if meanLIAR_sim > 10e-3
+        B_resp = meanLIAR_sim * sqrt(2) / (prm.WP.Sim.By.params{2} * prm.calib.coils.dBy_dVy / 2)
+    else
+        B_resp = 1.5e3; % V/G
+    end
+catch
+    B_resp = 1.5e3; % V/G
+end
+meanLIAR_129 = mean(R_129);
+B129_G = meanLIAR_129 * sqrt(2) / B_resp;
+B129 = B129_G *1e-4*1e15;
+meanLIAR_131 = mean(R_131); 
+B131_G = meanLIAR_131 * sqrt(2) / B_resp;
+B131 = B131_G *1e-4*1e15;
+
+
+
+% srS129 = sqrt(2) * noise_term_vals_129(1,6) * (1+R) ;
+% srS131 = sqrt(2) * noise_term_vals_131(1,6) * (1+R)/R ;
+
+srS129 = sqrt(2) * noise_term_vals_129(6) * (1+R) ;
+srS131 = sqrt(2) * noise_term_vals_131(6) * (1+R)/R ;
+
+% dB = 300*sqrt(2);
+% srS129 = sqrt(2) * dB / B129 * 180/pi * 3600;
+% srS131 = sqrt(2) * dB / B131 * 180/pi * 3600;
+
+% srS129 = sqrt(2) * 2.2e-3 *2.5;
+% srS131 = sqrt(2) * 2e-3 * 1.5;
+if isfield(prm.WP.Xe129.PIDconfig,'kP')
+    kP129 = prm.WP.Xe129.PIDconfig.kP*2*pi;
+    kP131 = prm.WP.Xe131.PIDconfig.kP*2*pi;
+    kI129 = abs(prm.WP.Xe129.PIDconfig.kI)*2*pi;
+    kI131 = abs(prm.WP.Xe131.PIDconfig.kI)*2*pi;
+
+    filter_func_129 = filter_func_RC;
+    filter_func_131 = filter_func_RC;
+
+else
+
+    if 0
+        %%
+        if strcmpi(prm.WP.Xe129.LIAconfig.output_ch2,'y')
+            mean_R129 = mean(get_act_LIA_signal(meas.Xe_129_R, 1, prm.WP.Xe129.LIAconfig));
+            Xe129_act_Y_from_phase = mean_R129;
+            switch prm.WP.Xe129.LIAconfig.output_expand_y
+                case 'OFF'; Xe129_expand_factor = 1;
+                case 'x10'; Xe129_expand_factor = 10;
+                case 'x100'; Xe129_expand_factor = 100;
+            end
+            Xe129_out_Y_from_act_Y = (10/prm.WP.Xe129.LIAconfig.sensitivity) * Xe129_expand_factor;
+            kP129 =  2*pi * 2*pi*prm.WP.Xe129.mod_dev/5 * prm.WP.Xe129.PIDconfig.prop_gain * Xe129_out_Y_from_act_Y * Xe129_act_Y_from_phase; % rad/s/V * V/V * V/V * V/rad
+        else
+            kP129 =  2*pi * 2*pi*prm.WP.Xe129.mod_dev/5 * prm.WP.Xe129.PIDconfig.prop_gain * (10 / 180) * 180/pi; % rad/s/V * V/V * V/deg * deg/rad
+        end
+
+        if strcmpi(prm.WP.Xe131.LIAconfig.output_ch2,'y')
+            mean_R131 = mean(get_act_LIA_signal(meas.Xe_131_R, 1, prm.WP.Xe131.LIAconfig));
+            Xe131_act_Y_from_phase = mean_R131;
+            switch prm.WP.Xe131.LIAconfig.output_expand_y
+                case 'OFF'; Xe131_expand_factor = 1;
+                case 'x10'; Xe131_expand_factor = 10;
+                case 'x100'; Xe131_expand_factor = 100;
+            end
+            Xe131_out_Y_from_act_Y = (10/prm.WP.Xe131.LIAconfig.sensitivity) * Xe131_expand_factor;
+            kP131 = 2*pi * 2*pi*prm.WP.Xe131.mod_dev/5 * prm.WP.Xe131.PIDconfig.prop_gain * Xe131_out_Y_from_act_Y * Xe131_act_Y_from_phase; % rad/s/V * V/V * V/V * V/rad
+        else
+            kP131 = 2*pi * 2*pi*prm.WP.Xe131.mod_dev/5 * prm.WP.Xe131.PIDconfig.prop_gain * (10 / 180) * 180/pi; % rad/s/V * V/V * V/deg * deg/rad
+        end
+    else
+        kP129 = -40;
+        kP131 = -40;
+    end
+
+    kI129 = abs(kP129)*prm.WP.Xe129.PIDconfig.int_gain;
+    kI131 = abs(kP131)*prm.WP.Xe131.PIDconfig.int_gain;
+
+    filter_func_129 = iif(prm.WP.Xe129.LIAconfig.advanced_filter, filter_func_GaussFIR, filter_func_RC); %  filter_func_RC;%
+    filter_func_131 = iif(prm.WP.Xe131.LIAconfig.advanced_filter, filter_func_GaussFIR, filter_func_RC); %
+    filter_params_129 = [prm.WP.Xe129.LIAconfig.time_const prm.WP.Xe129.LIAconfig.filter_order];
+    filter_params_131 = [prm.WP.Xe131.LIAconfig.time_const prm.WP.Xe131.LIAconfig.filter_order];
+
+end
+
+filter_params_129 = [prm.WP.Xe129.LIAconfig.time_const prm.WP.Xe129.LIAconfig.filter_order];
+filter_params_131 = [prm.WP.Xe131.LIAconfig.time_const prm.WP.Xe131.LIAconfig.filter_order];
+
+filter_129 = struct('func',@(s,p)filter_func_129(s,p), 'params',filter_params_129);
+filter_131 = struct('func',@(s,p)filter_func_131(s,p), 'params',filter_params_131);
+
+% plot(f,sqrt(G129^2+(2*pi*f).^2)*srS129/(1+R),'LineWidth',1,'color',linecolor(1),'HandleVisibility','off')
+% plot(f,sqrt(G131^2+(2*pi*f).^2)*srS131*R/(1+R),'LineWidth',1,'color',linecolor(2),'HandleVisibility','off')
+% plot(f,sqrt((sqrt(G129^2+(2*pi*f).^2)*srS129).^2 + (sqrt(G131^2+(2*pi*f).^2)*srS131).^2*R^2 )/(1+R),...
+%     'LineWidth',1,'color',linecolor(3),'HandleVisibility','off')
+
+srPSD_129_calc = NMRG_phase_freq_srPSD(f, srS129, T2_129,'kP',kP129,'kI',kI129,'filter_num',filter_129,'filter_denom',filter_129);
+srPSD_131_calc = NMRG_phase_freq_srPSD(f, srS131, T2_131,'kP',kP131,'kI',kI131,'filter_num',filter_131,'filter_denom',filter_131);
+
+% plot(f,srPSD_129_calc/(1+R),'-','LineWidth',1,'color',linecolor(1),'HandleVisibility','off')
+% plot(f,srPSD_131_calc*R/(1+R),'-','LineWidth',1,'color',linecolor(2),'HandleVisibility','off')
+% plot(f,sqrt(srPSD_129_calc.^2 + srPSD_131_calc.^2*R^2 )/(1+R),'-',...
+%     'LineWidth',1,'color',linecolor(3),'HandleVisibility','off')
+
+AWNd_129 = srS129/sqrt(2) / (1+R) ;
+AWNd_131 = srS131/sqrt(2) * R/(1+R);
+AWNd_Omega = sqrt(AWNd_129^2 + AWNd_131^2);
+
+ARW_129 = srS129/sqrt(2) * G129*60 / (1+R);
+ARW_131 = srS131/sqrt(2) * G131*60 * R/(1+R);
+ARW_Omega = sqrt(ARW_129^2 + ARW_131^2);
+
+theory_title_str = sprintf('^{129}Xe : %.2g %s (%.0f %s), ^{131}Xe : %.2g %s (%.0f %s)',...
+    srS129/sqrt(2)*1e3, 'mdeg/\surdHz', srS129/sqrt(2) / (1 / B129 * 180/pi),'fT/\surdHz',...
+    srS131/sqrt(2)*1e3, 'mdeg/\surdHz', srS131/sqrt(2) / (1 / B131 * 180/pi),'fT/\surdHz');
+
+srPSD129_str = sprintf('AWNd = %.1f %s, ARW = %1.f %s', AWNd_129*1e3, 'mdeg/\surdHz', ARW_129*1e3, 'mdeg/\surdhr');
+srPSD131_str = sprintf('AWNd = %.1f %s, ARW = %1.f %s', AWNd_131*1e3, 'mdeg/\surdHz', ARW_131*1e3, 'mdeg/\surdhr');
+srPSDOmega_str = sprintf('AWNd = %.1f %s, ARW = %1.f %s', AWNd_Omega*1e3, 'mdeg/\surdHz', ARW_Omega*1e3, 'mdeg/\surdhr');
+
+plot(f,srPSD_129_calc/(1+R),'-','LineWidth',1,'color',linecolor(1),'DisplayName',srPSD129_str)
+plot(f,srPSD_131_calc*R/(1+R),'-','LineWidth',1,'color',linecolor(2),'DisplayName',srPSD131_str)
+plot(f,sqrt(srPSD_129_calc.^2 + srPSD_131_calc.^2*R^2 )/(1+R),'-',...
+    'LineWidth',1,'color',linecolor(3),'DisplayName',srPSDOmega_str)
+
+l=legend('location','southoutside');
