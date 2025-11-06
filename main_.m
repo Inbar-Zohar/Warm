@@ -90,7 +90,7 @@ add_experimental_calibration;
 
 % daq definitions
 prm.cdaq_pause_time_sec = 1;
-prm.exp_time_min = 40; 
+prm.exp_time_min = 20; 
 prm.save_time_min = 1; 
 prm.ch_to_save= [1:12]; 
 % prm.ch_to_save= [1 2 3 4 5 6 7 8]; 
