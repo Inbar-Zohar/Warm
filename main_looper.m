@@ -1,0 +1,136 @@
+%% How to work with the code
+% Make sure the main_ script is doing what you want it to do in each run,
+% and that it doesn't overwrite the parameters you want to iterate on. 
+%
+% There are three sections of the code that needs to be manually modified
+% for each loop, which are marked with MODIFY ACCORDING TO NEED:
+%
+% 1. Define what you want to run over in the "Individual loops" section. Loops 
+% can be nested, and defined from the innermost out. e.g., if you want to
+% run over probe detuning values, and for each value run over several Bz 
+% values, define the individual loop for Bz and then the individual loop
+% for probe detuning. 
+% For each, define the variable name, the display unit, and the (display) 
+% values vector. A calibration factor can (and should) be defined if there's 
+% a correction factor between the input values vector and the one that's 
+% actually sent to the device, such that 
+%   (value in device) = (input value) / (calibration factor) 
+% e.g., if the device gets data in V but one wants to define and display  
+% the values vector in mV, the calibration factor is 1000.
+% 
+% 2. Inside the for loop, implement the value(s) of the loop as appropriate. 
+% For convenient application, it is recommended to rely on the same variable 
+% name as in the DorB structure.
+% 
+% 3. Choose what you want to save (out of the results saved in the meas struct
+% as a scalar) by listing them in the Results to save section. 
+%
+% The loop data struct will be saved in each run's folder (for whatever
+% happened until that run including), and in a dedicated folder that has
+% the same name as the first run with the "_loop" tag (gets updated and 
+% eventually will have the final version). A default analysis file is also
+% copied to the dedicated folder. 
+
+
+%% Loop data initialization - no need to touch
+full_loop_data = struct;
+params2save = {};
+is_part_of_loop = 1;
+
+%% Individual loops - MODIFY ACCORDING TO NEED
+single_loop_data = struct;
+loop_num = 0;
+
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'DeltaPump'; 
+% single_loop_data(loop_num).val_vec = 1:0.25:5;
+% single_loop_data(loop_num).unit = 'GHz'; 
+% single_loop_data(loop_num).calib = 1e-9;
+ 
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'gradBz'; 
+% single_loop_data(loop_num).val_vec = [0.0:0.1:1.2];
+% single_loop_data(loop_num).unit = 'mA'; 
+% single_loop_data(loop_num).calib = 1e3;
+
+loop_num = loop_num+1;
+single_loop_data(loop_num).loop_var = 'LaserTempPump'; 
+single_loop_data(loop_num).val_vec = [-80:20:0 5:5:25 28:2:42 45:5:65 70:20:130];
+single_loop_data(loop_num).unit = 'mV'; 
+single_loop_data(loop_num).calib = 1e3;
+% 
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'LaserTempProbe'; 
+% single_loop_data(loop_num).val_vec = [-60:5:-30 30:5:60];
+% single_loop_data(loop_num).unit = 'mV'; 
+% single_loop_data(loop_num).calib = 1e3;
+
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'PowerPump'; 
+% single_loop_data(loop_num).val_vec = [0];
+% single_loop_data(loop_num).unit = 'V'; 
+% single_loop_data(loop_num).calib = 1;
+
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'Xe129_PropGain'; 
+% single_loop_data(loop_num).val_vec = -[10 12 15 20 30];
+% single_loop_data(loop_num).unit = ''; 
+% single_loop_data(loop_num).calib = 1;
+
+% loop_num = loop_num+1;
+% single_loop_data(loop_num).loop_var = 'ESR_PropGain'; 
+% single_loop_data(loop_num).val_vec = flip([1 3 5 10]);
+% single_loop_data(loop_num).unit = ''; 
+% single_loop_data(loop_num).calib = 1;
+
+
+%% Results to save - MODIFY ACCORDING TO NEED
+params2save = {}; % Keep empty to save all scalar values from meas
+
+%% Create full loop data
+full_loop_data = loop_create_full_loop_data(single_loop_data, params2save);
+
+%% Actual loop
+t0 = tic;
+disp('Starting loop');
+% Xenons = [129 131];
+
+for ind_run = 1:full_loop_data.n_runs_total
+    %% Update full loop data with current run
+    full_loop_data = loop_update_loop_data_w_run(full_loop_data, ind_run);
+    %% Apply the values of the current loop iteration 
+    for ind_single = 1:length(full_loop_data.sub_run)
+        %% Loop-level bookkeeping
+        this_loop = full_loop_data.single_loop_data(ind_single);
+        this_sub = full_loop_data.sub_run(ind_single);
+        
+        this_val_act = this_loop.val_vec(this_sub);
+        this_val_raw = this_val_act / this_loop.calib;
+        
+        %% Actual implementation - MODIFY ACCORDING TO NEED.
+        DorB.(this_loop.loop_var).apply('DC', this_val_raw)
+        % DorB.(this_loop.loop_var).apply('setCurrent', this_val_raw)        
+        % DorB.(this_loop.loop_var).setDetuning(this_val_raw)
+        % vardata = strsplit(this_loop.loop_var,'_');
+        % DorB.([vardata{1} '_PID']).apply(['set' vardata{2}],this_val_raw)
+        
+        % for ind=1:2
+            % DorB.(['Xe' num2str(Xenons(ind)) 'PID']).apply(['set' this_loop.loop_var],this_val_raw)
+        % end
+    end
+    pause(10);
+    
+    %% Run experiment   
+    main_;
+
+    %% Extract desired data and save
+    full_loop_data = loop_update_loop_results(full_loop_data,meas,folder_path);
+    full_loop_data = loop_save_loop_results(full_loop_data,ind_run==1,folder_path);  
+       
+    %% Bookeeping
+    pause(0.5)   
+    genericTimebar(ind_run, full_loop_data.n_runs_total, [], t0, 'Finished run', 0)
+end
+loop_data = full_loop_data;
+clear is_part_of_loop full_loop_data
+
